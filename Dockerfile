@@ -20,4 +20,4 @@ COPY  . .
 RUN pytest --cov
 
 # Run the python application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["python", "main.py"]

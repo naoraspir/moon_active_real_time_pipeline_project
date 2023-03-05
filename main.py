@@ -37,7 +37,7 @@ data_transformer = DataTransformer()
 data_predictor = PurchasePredictor()
 
 # create the extract transform and predict pipeline orchstrator object
-etl_pipeline = ETPPipeline(data_transformer, data_predictor)
+etp_pipeline = ETPPipeline(data_transformer, data_predictor)
 
 # base route
 @app.get("/")
@@ -48,9 +48,15 @@ async def root():
 async def init_data_resources(body: DataResourceConfig):
     # Create a kafka consumer and an mysql connection, the stream controling service will send the
     # configs for this specific prediction microservice. that way we can allow scalability.
-
-    # Load Kafka consumer configuration from JSON formatted string
-    kafka_config = json.loads(body.kafka_config)
+    try:
+        # Load Kafka consumer configuration from JSON formatted string
+        kafka_config = json.loads(body.kafka_config)
+        # Load MySQL connector configuration from JSON formatted string
+        mysql_config = json.loads(body.mysql_config)
+    except Exception as error_message:
+        logging.error(msg=error_message, exc_info=True)
+        raise HTTPException(status_code=400, detail={
+                            "message": "Error formating resources configuration: {}".format(str(error_message))})
     # Create Kafka consumer instance
     try:
         consumer = KafkaConsumer(
@@ -66,8 +72,7 @@ async def init_data_resources(body: DataResourceConfig):
         raise HTTPException(status_code=400, detail={
                             "message": "Error initializing Kafka: {}".format(str(error_message))})
 
-    # Load MySQL connector configuration from JSON formatted string
-    mysql_config = json.loads(body.mysql_config)
+    
     # Create MySQL connection instance
     try:
         connection = mysql.connector.connect(
@@ -81,20 +86,20 @@ async def init_data_resources(body: DataResourceConfig):
                             "message": "Error initializing Kafka: {}".format(str(error_message))})
 
     # Set data extractor instance
-    etl_pipeline.set_data_extractor(DataExtractor(consumer, connection))
+    etp_pipeline.set_data_extractor(DataExtractor(consumer, connection))
 
     return {"message": "Kafka and MySQL initialized successfully."}
 
 # route for the batch predictions webhook
 @app.post("/predictions_webhook", response_model=PredictionResponse)
 async def return_batch_predictions(body: PredictionRequest):
-    if not etl_pipeline.data_extractor:
+    if not etp_pipeline.data_extractor:
         raise HTTPException(status_code=400, detail={
                             "message": "Data resources not initialized. Please call /init_data_resources first."})
     try:
         # run the ETL pipeline with the batch size from the request
         logging.info("Running ETL pipeline with batch size: {}".format(body.batch_size))
-        result_dict, corrupt_data_user_ids = await etl_pipeline.run(body.batch_size)
+        result_dict, corrupt_data_user_ids = await etp_pipeline.run(body.batch_size)
 
         # create the response object
         global REQUEST_ID_COUNTER
